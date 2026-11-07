@@ -817,4 +817,92 @@ e.innerHTML=`${row('Nutrition days',c.nutrition_days)}${row('Food entries',c.foo
 dbInit();
 
 render();
-</script></body></html>
+</script>render();
+</script>
+<script>
+/* v7: connects the chat to node-api and stores your Supabase details */
+window.HT_SUPABASE={url:"https://nrhueaczjnyhjcoqixlf.supabase.co",anonKey:"eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im5yaHVlYWN6am55aGpjb3FpeGxmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQwNTIwMjksImV4cCI6MjEwOTYyODAyOX0.oav3VXIEgjJVXIt9qr79nybsix_mSgsU9GfTerqGCEwc"};
+SB.cfg=sbCfg();
+if(typeof gateMaybe=='function')gateMaybe();
+
+const curItemsOf = cv => {
+  for (let i = cv.msgs.length - 1; i >= 0; i--) {
+    const x = cv.msgs[i];
+    if (x.role === 'assistant' && Array.isArray(x.items)) return x.items;
+  }
+  return [];
+};
+
+function syncChatFoods(cv, items) {
+  const d = today(), L = LG(d), src = 'chat:' + cv.id;
+  L.food = (L.food || []).filter(f => f.src !== src);
+  items.forEach(it => L.food.push({
+    id: uid(),
+    src,
+    label: it.name,
+    qty: it.quantity,
+    kcal: it.calories,
+    prot: it.protein_g,
+    carbs: it.carbs_g,
+    fat: it.fat_g,
+    fib: it.fibre_g,
+    manual: false,
+  }));
+}
+
+function summariseFood(j) {
+  const v = x => (x == null ? 'unknown' : x);
+  const lines = j.items.map(it =>
+    `${it.name} (${it.quantity}): ${v(it.calories)} kcal, ${v(it.protein_g)} g protein, ${v(it.fibre_g)} g fibre`);
+  const t = j.totals;
+  let s = 'Logged for today:\n' + lines.join('\n');
+  s += `\n\nTotal: ${t.calories.total} kcal, ${t.protein_g.total} g protein, ${t.carbs_g.total} g carbs, ${t.fat_g.total} g fat, ${t.fibre_g.total} g fibre`;
+  if (!t.complete) s += '\nSome values are unknown, so the totals may be incomplete.';
+  if (j.assumptions && j.assumptions.length) s += '\n\nAssumptions: ' + j.assumptions.join(' ');
+  return s;
+}
+
+async function runAI(cv, m) {
+  const ai = cv.msgs.push({ role: 'assistant', content: 'Working on it…', ts: Date.now() }) - 1;
+  busy = true; FB = 2; CUREFF = null; render();
+  try {
+    const cfg = sbCfg();
+    if (!cfg) throw new Error('cloud sync is not set up. Open Settings and tap Set up cloud sync.');
+    const current = curItemsOf(cv);
+    const ctl = new AbortController();
+    const tm = setTimeout(() => ctl.abort(), 20000);
+    let res, j = null;
+    try {
+      res = await fetch(cfg.url + '/functions/v1/node-api', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          apikey: cfg.key,
+          Authorization: 'Bearer ' + cfg.key,
+        },
+        body: JSON.stringify({ message: m, current_items: current }),
+        signal: ctl.signal,
+      });
+      j = await res.json().catch(() => null);
+    } finally {
+      clearTimeout(tm);
+    }
+    if (!res.ok || !j || !j.ok) {
+      throw new Error((j && j.error) || ('the AI service returned HTTP ' + res.status + '.'));
+    }
+    cv.msgs[ai].items = j.items;
+    cv.msgs[ai].content = summariseFood(j);
+    syncChatFoods(cv, j.items);
+  } catch (e) {
+    const t = e && e.name === 'AbortError'
+      ? 'the request took longer than 20 seconds. Please try again.'
+      : ((e && e.message) || 'unknown error');
+    cv.msgs[ai].content = 'The AI is not available right now: ' + t;
+  }
+  busy = false;
+  if (!save()) toast('Could not save this chat');
+  if (tab == 'chat') FB = STK ? 2 : 0;
+  render();
+}
+</script>
+</body></html></body></html>
